@@ -1,0 +1,37 @@
+{
+  "name": "jotta-versions",
+  "version": "0.1.0",
+  "description": "Browse and download file revisions from Jottacloud – leveraging the local desktop daemon for zero-config auth",
+  "author": "hl9020",
+  "homepage": "https://github.com/hl9020/jotta-versions#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hl9020/jotta-versions.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hl9020/jotta-versions/issues"
+  },
+  "type": "module",
+  "bin": {
+    "jotta-versions": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:check": "tsc --noEmit",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js"
+  },
+  "keywords": ["jottacloud", "versioning", "backup", "revisions", "cli"],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "^4",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
