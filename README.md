@@ -8,9 +8,10 @@ Jottacloud keeps up to 5 versions of every file, but the only way to access them
 
 The Jottacloud desktop app (Windows/macOS) or CLI daemon (Linux) runs a local daemon (`jottad`) that manages authentication. This tool:
 
-1. Connects to the daemon on `localhost:14443` via gRPC
-2. Gets a fresh access token (no credentials needed)
-3. Uses the Jottacloud JFS REST API to browse files and download revisions
+1. Reads the daemon port from the ServiceDiscovery file (port is dynamic!)
+2. Connects to the daemon via gRPC over HTTP/2
+3. Gets a fresh access token (no credentials needed)
+4. Uses the Jottacloud JFS REST API to browse files and download revisions
 
 **No API keys. No tokens. No config files.** Just `jottad` running in the background.
 
