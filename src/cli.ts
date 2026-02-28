@@ -1,25 +1,59 @@
 #!/usr/bin/env node
-import { mkdirSync, existsSync, readFileSync } from 'node:fs';
-import { resolve, join, normalize } from 'node:path';
+import { mkdirSync, existsSync, readFileSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { resolve, join, dirname } from 'node:path';
 import { getAccessToken, isDaemonRunning } from './daemon.js';
 import { getUsernameFromToken, listDevices, listFolder, listRevisions, jfsDownload } from './api.js';
 import { selectFromList, header, formatSize, formatDate, spinner, progressBar, close, prompt, c } from './ui.js';
 import type { Device, FolderEntry, Revision } from './api.js';
 
-const DOWNLOAD_DIR = resolve('./downloads');
+const JOTTA_DB = join(process.env.APPDATA || '', 'Jottacloud', 'appdata');
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-function safePath(base: string, ...segments: string[]): string {
-  const full = normalize(join(base, ...segments));
-  if (!full.startsWith(normalize(base))) throw new Error('Path traversal detected');
-  return full;
+interface PathMappings { [folder: string]: string }
+
+let syncMappingsCache: PathMappings | null = null;
+
+function readJottaSyncMappings(): PathMappings {
+  if (syncMappingsCache) return syncMappingsCache;
+  const mappings: PathMappings = {};
+  try {
+    const ctx = JSON.parse(readFileSync(join(JOTTA_DB, 'context'), 'utf8'));
+    const dbPath = join(JOTTA_DB, ctx.Name, 'db');
+    const fd = openSync(dbPath, 'r');
+    const buf = Buffer.alloc(statSync(dbPath).size);
+    readSync(fd, buf, 0, buf.length, 0);
+    closeSync(fd);
+    const text = buf.toString('utf8');
+    const re = /"Path":\s*"([^"]+)",\s*"Name":\s*"([^"]+)",\s*"FilesystemID"/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text))) {
+      mappings[m[2]] = m[1].replace(/\//g, '\\');
+    }
+  } catch { /* Jottacloud app not installed or db inaccessible */ }
+  syncMappingsCache = mappings;
+  return mappings;
+}
+
+async function resolveLocalRoot(topFolder: string): Promise<string | null> {
+  const mappings = readJottaSyncMappings();
+  if (mappings[topFolder] && existsSync(mappings[topFolder])) return mappings[topFolder];
+
+  // Fallback: manual input
+  console.log(`${c.YELLOW}?${c.RESET} Local path for ${c.BOLD}${topFolder}${c.RESET} not found in Jottacloud config.`);
+  const manual = await prompt(`  Enter local path (or empty to skip): `);
+  if (!manual) return null;
+  const resolved = resolve(manual);
+  if (!existsSync(resolved)) {
+    console.log(`${c.RED}✗${c.RESET} Path does not exist.`);
+    return null;
+  }
+  return resolved;
 }
 
 async function main() {
   console.log(`\n${c.BOLD}jotta-versions${c.RESET} ${c.DIM}v${pkg.version}${c.RESET}`);
-  console.log(`${c.DIM}Browse & download file revisions from Jottacloud${c.RESET}\n`);
+  console.log(`${c.DIM}Browse & restore file revisions from Jottacloud${c.RESET}\n`);
 
-  // Check daemon
   const sp = spinner('Connecting to Jottacloud daemon...');
   if (!(await isDaemonRunning())) {
     sp.stop();
@@ -33,7 +67,6 @@ async function main() {
   const username = getUsernameFromToken(token);
   sp.stop(`Connected as ${c.CYAN}${username}${c.RESET}`);
 
-  // Device selection
   const devices = await listDevices(token, username);
   const device = await selectFromList<Device>(
     devices,
@@ -42,7 +75,6 @@ async function main() {
   );
   if (!device) { close(); return; }
 
-  // Browse loop
   let currentPath = `${username}/${device.name}`;
   const pathStack: string[] = [];
 
@@ -83,15 +115,17 @@ async function main() {
       continue;
     }
 
-    // File selected → show revisions
-    const relativePath = currentPath.replace(username + '/', '');
-    await showRevisions(freshToken, `${currentPath}/${selected.name}`, relativePath);
+    const fullRelative = currentPath.replace(username + '/', '');
+    const parts = fullRelative.split('/');
+    const topFolder = parts[1];
+    const subPath = parts.slice(2).join('/');
+    await showRevisions(freshToken, `${currentPath}/${selected.name}`, topFolder, subPath);
   }
 
   close();
 }
 
-async function showRevisions(token: string, filePath: string, relativePath: string) {
+async function showRevisions(token: string, filePath: string, topFolder: string, subPath: string) {
   const sp = spinner('Loading revisions...');
   const { name, revisions } = await listRevisions(token, filePath);
   sp.stop(`${c.BOLD}${name}${c.RESET} – ${revisions.length} revision(s)`);
@@ -113,28 +147,42 @@ async function showRevisions(token: string, filePath: string, relativePath: stri
 
     if (!rev) return;
 
-    // Build download path: ./downloads/{relative-path}/filename.revN.ext
-    const revName = rev.number === revisions[0].number
-      ? name
-      : name.replace(/(\.[^.]+)$/, `.rev${rev.number}$1`);
-    const outDir = safePath(DOWNLOAD_DIR, relativePath);
-    mkdirSync(outDir, { recursive: true });
-    const outPath = safePath(DOWNLOAD_DIR, relativePath, revName);
-
-    if (existsSync(outPath)) {
-      const overwrite = await prompt(`  ${c.YELLOW}File exists. Overwrite?${c.RESET} [y/N] `);
-      if (overwrite.toLowerCase() !== 'y') continue;
+    const localRoot = await resolveLocalRoot(topFolder);
+    if (!localRoot) {
+      console.log(`${c.RED}✗${c.RESET} Cannot restore without local path.`);
+      continue;
     }
+
+    const targetDir = subPath ? join(localRoot, subPath) : localRoot;
+    const originalPath = join(targetDir, name);
+    const revName = name.replace(/(\.[^.]+)$/, `.rev${rev.number}$1`);
+    const revPath = join(targetDir, revName);
+
+    console.log(`\n  ${c.BOLD}Target:${c.RESET} ${targetDir}`);
+    if (existsSync(originalPath)) {
+      console.log(`  ${c.YELLOW}⚠${c.RESET} File ${c.BOLD}${name}${c.RESET} exists at target.`);
+    }
+    console.log(`  ${c.CYAN}[O]${c.RESET} Overwrite → ${c.DIM}${originalPath}${c.RESET}`);
+    console.log(`  ${c.CYAN}[R]${c.RESET} Save as revision → ${c.DIM}${revPath}${c.RESET}`);
+    console.log(`  ${c.DIM}[C] Cancel${c.RESET}`);
+    const choice = await prompt(`\n  ${c.CYAN}>${c.RESET} `);
+
+    let outPath: string;
+    if (choice.toLowerCase() === 'o') outPath = originalPath;
+    else if (choice.toLowerCase() === 'r') outPath = revPath;
+    else continue;
+
+    mkdirSync(dirname(outPath), { recursive: true });
 
     const prog = progressBar(rev.size);
     try {
       const freshToken = await getAccessToken();
-      const bytes = await jfsDownload(freshToken, filePath, outPath, rev.number, (b, t) => prog.update(b));
+      const bytes = await jfsDownload(freshToken, filePath, outPath, rev.number, (b) => prog.update(b));
       prog.done();
-      console.log(`\n  ${c.GREEN}████ DOWNLOADED ████${c.RESET}  Rev ${c.BOLD}${rev.number}${c.RESET} of ${c.BOLD}${name}${c.RESET} (${formatSize(bytes)}) → ${c.BOLD}${outPath}${c.RESET}\n`);
+      console.log(`\n  ${c.GREEN}████ RESTORED ████${c.RESET}  Rev ${c.BOLD}${rev.number}${c.RESET} of ${c.BOLD}${name}${c.RESET} (${formatSize(bytes)}) → ${c.BOLD}${outPath}${c.RESET}\n`);
     } catch (e) {
       prog.done();
-      console.log(`${c.RED}✗${c.RESET} Download failed: ${(e as Error).message}`);
+      console.log(`${c.RED}✗${c.RESET} Restore failed: ${(e as Error).message}`);
     }
   }
 }
