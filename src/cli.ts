@@ -6,7 +6,15 @@ import { getUsernameFromToken, listDevices, listFolder, listRevisions, jfsDownlo
 import { selectFromList, header, formatSize, formatDate, spinner, progressBar, close, prompt, c } from './ui.js';
 import type { Device, FolderEntry, Revision } from './api.js';
 
-const JOTTA_DB = join(process.env.APPDATA || '', 'Jottacloud', 'appdata');
+function getJottaAppDataDir(): string {
+  switch (process.platform) {
+    case 'win32': return join(process.env.APPDATA || '', 'Jottacloud', 'appdata');
+    case 'darwin': return join(process.env.HOME || '', 'Library', 'Application Support', 'Jottacloud', 'appdata');
+    default: return join(process.env.HOME || '', '.config', 'Jottacloud', 'appdata');
+  }
+}
+
+const JOTTA_DB = getJottaAppDataDir();
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 interface PathMappings { [folder: string]: string }

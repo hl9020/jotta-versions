@@ -16,6 +16,14 @@ The Jottacloud desktop app (Windows/macOS) or CLI daemon (Linux) runs a local da
 
 **No API keys. No tokens. No config files.** Just `jottad` running in the background.
 
+## Platform support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| Windows | ✅ Verified | Tested with Jottacloud desktop app |
+| macOS | ⚠️ Untested | Should work – paths auto-detected from `~/Library/Application Support/Jottacloud/` |
+| Linux | ⚠️ Untested | Should work – paths auto-detected from `~/.config/Jottacloud/` |
+
 ## Requirements
 
 - **Windows/macOS:** [Jottacloud desktop app](https://www.jottacloud.com/download) installed and logged in
