@@ -1,8 +1,8 @@
 # jotta-versions
 
-Browse and download **file revisions** from Jottacloud – directly from the terminal.
+Browse and **restore file revisions** from Jottacloud – directly from the terminal.
 
-Jottacloud keeps up to 5 versions of every file, but the only way to access them is through the web interface with 2FA login every time. This tool fixes that by talking directly to the local Jottacloud daemon - **zero config, zero login, zero hassle**.
+Jottacloud keeps up to 5 versions of every file, but the only way to access them is through the web interface with 2FA login every time. This tool fixes that by talking directly to the local Jottacloud daemon and restoring revisions to their **original location** on disk - **zero config, zero login, zero hassle**.
 
 ## How it works
 
@@ -11,7 +11,8 @@ The Jottacloud desktop app (Windows/macOS) or CLI daemon (Linux) runs a local da
 1. Reads the daemon port from the ServiceDiscovery file (port is dynamic!)
 2. Connects to the daemon via gRPC over HTTP/2
 3. Gets a fresh access token (no credentials needed)
-4. Uses the Jottacloud JFS REST API to browse files and download revisions
+4. Reads sync folder mappings from the Jottacloud BoltDB to resolve local paths
+5. Uses the Jottacloud JFS REST API to browse files and restore revisions
 
 **No API keys. No tokens. No config files.** Just `jottad` running in the background.
 
@@ -43,7 +44,7 @@ The interactive browser guides you through:
 
 ```
 jotta-versions v0.1.0
-Browse & download file revisions from Jottacloud
+Browse & restore file revisions from Jottacloud
 
 ✓ Connected as a1b2c3d4e5f6g7h8
 
@@ -81,29 +82,29 @@ Revisions of hero-image.psd
 
 > 3
 
-  ██████████████░░░░░░░░░░░░░░░░ 45%  19.0 MB/42.1 MB  8.4 MB/s
+  Target: D:\Projects\my-project
+  ⚠ File hero-image.psd exists at target.
+  [O] Overwrite → D:\Projects\my-project\hero-image.psd
+  [R] Save as revision → D:\Projects\my-project\hero-image.rev1.psd
+  [C] Cancel
+
+  > r
+
   ██████████████████████████████ 100%  42.1 MB/42.1 MB  9.1 MB/s
 
-  ████ DOWNLOADED ████  Rev 1 of hero-image.psd (42.1 MB) → downloads/MY-LAPTOP/Documents/my-project/hero-image.rev1.psd
+  ████ RESTORED ████  Rev 1 of hero-image.psd (42.1 MB) → D:\Projects\my-project\hero-image.rev1.psd
 ```
 
-Downloaded files are saved to `./downloads/` mirroring the remote folder structure:
-
-```
-./downloads/
-  MY-LAPTOP/Documents/my-project/
-    hero-image.rev1.psd
-    hero-image.rev2.psd
-```
+Revisions are restored to their **original location** on disk. The tool reads sync folder mappings directly from the Jottacloud desktop app's local database to resolve the correct paths. You choose to either **overwrite** the current file or save it as a `.revN` copy next to the original.
 
 ## Features
 
 - **Zero config** - authenticates via the local Jottacloud daemon, no credentials needed
+- **Restore to original path** - reads sync mappings from Jottacloud's local DB to find the correct location
+- **Overwrite or revision copy** - choose to replace the file or save as `.revN` next to the original
 - **Interactive browser** - navigate devices, folders, and files with a simple menu
 - **Progress bar** - real-time download progress with speed and percentage
 - **Stream-to-disk** - downloads are streamed directly to disk, no file size limits
-- **Overwrite protection** - prompts before replacing existing downloads
-- **Path traversal protection** - validates all download paths stay within the output directory
 
 ## How the reverse engineering was done
 
