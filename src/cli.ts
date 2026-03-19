@@ -28,15 +28,22 @@ function readJottaSyncMappings(): PathMappings {
     const ctx = JSON.parse(readFileSync(join(JOTTA_DB, 'context'), 'utf8'));
     const dbPath = join(JOTTA_DB, ctx.Name, 'db');
     const fd = openSync(dbPath, 'r');
-    const buf = Buffer.alloc(statSync(dbPath).size);
-    readSync(fd, buf, 0, buf.length, 0);
-    closeSync(fd);
-    const text = buf.toString('utf8');
+    const size = statSync(dbPath).size;
+    const chunkSize = 64 * 1024 * 1024;
+    const overlap = 1024;
     const re = /"Path":\s*"([^"]+)",\s*"Name":\s*"([^"]+)",\s*"FilesystemID"/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text))) {
-      mappings[m[2]] = m[1].replace(/\//g, '\\');
+    for (let off = 0; off < size; off += chunkSize - overlap) {
+      const len = Math.min(chunkSize, size - off);
+      const buf = Buffer.alloc(len);
+      readSync(fd, buf, 0, len, off);
+      const text = buf.toString('utf8');
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text))) {
+        mappings[m[2]] = m[1].replace(/\//g, '\\');
+      }
+      re.lastIndex = 0;
     }
+    closeSync(fd);
   } catch { /* Jottacloud app not installed or db inaccessible */ }
   syncMappingsCache = mappings;
   return mappings;
